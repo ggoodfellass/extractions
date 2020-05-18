@@ -3,11 +3,11 @@ defmodule Extractions do
   @format ~r[(?<start_hour>\d{2}):(?<start_minute>\d{2})-(?<end_hour>\d{2}):(?<end_minute>\d{2})]
 
   def start do
-    start_date = Calendar.DateTime.from_erl!({{2020, 1, 2},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
+    start_date = Calendar.DateTime.from_erl!({{2020, 1, 25},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
     end_date = Calendar.DateTime.from_erl!({{2020, 2, 2},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
 
     schedule = %{
-      "Friday" => ["08:00-18:00", "19:00-21:00"],
+      "Friday" => ["08:00-18:00"],
       "Monday" => ["08:00-18:00"],
       "Saturday" => [],
       "Sunday" => [],
@@ -45,7 +45,6 @@ defmodule Extractions do
         {:ok, after_seconds, 0, :after} = Calendar.DateTime.diff(ending, starting)
         {count + (after_seconds / interval)}
       end)
-
   end
 
   defp get_date_pairs(dates, camera_exid, schedule) do
