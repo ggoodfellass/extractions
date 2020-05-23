@@ -5,15 +5,14 @@ defmodule Extractions do
   def start do
     start_date = Calendar.DateTime.from_erl!({{2020, 1, 25},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
     end_date = Calendar.DateTime.from_erl!({{2020, 2, 2},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
-
     schedule = %{
-      "Friday" => ["08:00-18:00"],
-      "Monday" => ["08:00-18:00"],
-      "Saturday" => [],
-      "Sunday" => [],
-      "Thursday" => ["08:00-18:00"],
-      "Tuesday" => ["08:00-18:00"],
-      "Wednesday" => ["08:00-18:00"]
+      "Friday" => ["00:00-23:59"],
+      "Monday" => ["00:00-23:59"],
+      "Saturday" => ["00:00-23:59"],
+      "Sunday" => ["00:00-23:59"],
+      "Thursday" => ["00:00-23:59"],
+      "Tuesday" => ["00:00-23:59"],
+      "Wednesday" => ["00:00-23:59"]
     }
     |> Enum.filter(fn {_, v} -> length(v) != 0 end)
     |> Enum.into(%{})
@@ -34,24 +33,31 @@ defmodule Extractions do
       |> Enum.filter(fn(day) ->
         Enum.member?(days, day |> Calendar.Strftime.strftime!("%A"))
       end)
+      #Put skip empty filter here as well.
 
     valid_dates =
       all_days
       |> get_date_pairs(camera_exid, schedule)
+      |> Enum.map(&handle_pair(&1, interval))
+  end
 
-    {get_expected_count} =
-      Enum.reduce(valid_dates, {0}, fn date_pair, {count} ->
-        %{starting: starting, ending: ending} = date_pair
-        {:ok, after_seconds, 0, :after} = Calendar.DateTime.diff(ending, starting)
-        {count + (after_seconds / interval)}
-      end)
+  defp handle_pair(%{starting: starting, ending: ending}, interval) do
+    {:ok, after_seconds, 0, :after} = Calendar.DateTime.diff(ending, starting)
+    chunk = ((after_seconds / interval) + 1) |> Float.ceil |> trunc
+    Stream.iterate(starting, &(Calendar.DateTime.add!(&1, interval)))
+    |> Enum.take(chunk)
+  end
+
+  def get_expected_count(dates, interval) do
+    Enum.reduce(dates, 0, fn date_pair, count ->
+      %{starting: starting, ending: ending} = date_pair
+      {:ok, after_seconds, 0, :after} = Calendar.DateTime.diff(ending, starting)
+      count + (after_seconds / interval)
+    end) |> Float.ceil
   end
 
   defp get_date_pairs(dates, camera_exid, schedule) do
     dates
-    # |> Enum.filter(fn date ->
-    #   request_from_seaweedfs("http://localhost:8888/#{camera_exid}/snapshots/recordings/#{strft_date(date, "%Y")}/#{strft_date(date, "%m")}/#{strft_date(date, "%d")}/", "Entries", "FullPath") != []
-    # end)
     |> Enum.map(fn date ->
       schedule[Calendar.Strftime.strftime!(date, "%A")]
       |> get_head_tail
@@ -79,21 +85,6 @@ defmodule Extractions do
 
   defp strft_date(date, pattern), do: Calendar.Strftime.strftime!(date, pattern)
 
-  defp get_base_name(list, "Entries", "FullPath"), do: list |> Path.basename
-  defp get_base_name(list, _, _), do: list
-
-  def request_from_seaweedfs(url, type, attribute) do
-    hackney = []
-    with {:ok, response} <- HTTPoison.get(url, ["Accept": "application/json"], hackney: hackney),
-         %HTTPoison.Response{status_code: 200, body: body} <- response,
-         {:ok, data} <- Jason.decode(body),
-         true <- is_list(data[type]) do
-      Enum.map(data[type], fn(item) -> item[attribute] |> get_base_name(type, attribute) end)
-    else
-      _ -> []
-    end
-  end
-
   defp shift_zone(date, timezone \\ "Europe/Dublin") do
     date |> Calendar.DateTime.shift_zone!(timezone)
   end
@@ -106,12 +97,5 @@ defmodule Extractions do
   def get_head_tail(nil), do: []
   def get_head_tail([head|tail]) do
     [[head]|get_head_tail(tail)]
-  end
-
-  def ambiguous_handle(value) do
-    case value do
-      {:ok, datetime} -> datetime
-      {:ambiguous, datetime} -> datetime.possible_date_times |> hd
-    end
   end
 end
