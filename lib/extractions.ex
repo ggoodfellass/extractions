@@ -4,7 +4,7 @@ defmodule Extractions do
 
   def start do
     start_date = Calendar.DateTime.from_erl!({{2020, 1, 25},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
-    end_date = Calendar.DateTime.from_erl!({{2020, 2, 2},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
+    end_date = Calendar.DateTime.from_erl!({{2020, 1, 25},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
     schedule = %{
       "Friday" => ["00:00-23:59"],
       "Monday" => ["00:00-23:59"],
@@ -35,15 +35,22 @@ defmodule Extractions do
       end)
       #Put skip empty filter here as well.
 
+
     valid_dates =
       all_days
       |> get_date_pairs(camera_exid, schedule)
+
+    expected_count = get_expected_count(valid_dates, interval)
+
+    dates_with_intervals =
+      valid_dates
       |> Enum.map(&handle_pair(&1, interval))
+      |> List.flatten()
   end
 
   defp handle_pair(%{starting: starting, ending: ending}, interval) do
     {:ok, after_seconds, 0, :after} = Calendar.DateTime.diff(ending, starting)
-    chunk = ((after_seconds / interval) + 1) |> Float.ceil |> trunc
+    chunk = ((after_seconds / interval)) |> Float.ceil |> trunc
     Stream.iterate(starting, &(Calendar.DateTime.add!(&1, interval)))
     |> Enum.take(chunk)
   end
@@ -53,7 +60,7 @@ defmodule Extractions do
       %{starting: starting, ending: ending} = date_pair
       {:ok, after_seconds, 0, :after} = Calendar.DateTime.diff(ending, starting)
       count + (after_seconds / interval)
-    end) |> Float.ceil
+    end) |> Float.ceil |> trunc()
   end
 
   defp get_date_pairs(dates, camera_exid, schedule) do
