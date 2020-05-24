@@ -3,8 +3,8 @@ defmodule Extractions do
   @format ~r[(?<start_hour>\d{2}):(?<start_minute>\d{2})-(?<end_hour>\d{2}):(?<end_minute>\d{2})]
 
   def start do
-    start_date = Calendar.DateTime.from_erl!({{2020, 1, 25},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
-    end_date = Calendar.DateTime.from_erl!({{2020, 1, 25},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
+    start_date = Calendar.DateTime.from_erl!({{2020, 5, 24},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
+    end_date = Calendar.DateTime.from_erl!({{2020, 5, 25},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
     schedule = %{
       "Friday" => ["00:00-23:59"],
       "Monday" => ["00:00-23:59"],
@@ -24,7 +24,8 @@ defmodule Extractions do
         if length(hours) != 0, do: day
       end) |> Enum.filter(& !is_nil(&1))
 
-    camera_exid = "waxie-jolxd"
+    camera_exid = "everc-dupzo"
+    camera_timezone = "Europe/Dublin"
 
     interval = 1200
 
@@ -38,14 +39,27 @@ defmodule Extractions do
 
     valid_dates =
       all_days
-      |> get_date_pairs(camera_exid, schedule)
+      |> get_date_pairs(schedule, camera_timezone)
 
-    expected_count = get_expected_count(valid_dates, interval)
+    IO.inspect expected_count = get_expected_count(valid_dates, interval)
 
     dates_with_intervals =
       valid_dates
       |> Enum.map(&handle_pair(&1, interval))
       |> List.flatten()
+      |> Enum.group_by(&Calendar.DateTime.from_erl!({{&1.year, &1.month, &1.day}, {0, 0, 0}}, camera_timezone))
+      |> Enum.filter(&drop_not_available_days(&1, camera_exid) != [])
+      # |> Enum.map(&download_and_dropbox_batch(&1, camera_exid))
+  end
+
+  defp drop_not_available_days({date, _}, camera_exid) do
+    filer = point_to_seaweed(Calendar.DateTime.Format.unix(date))
+    request_from_seaweedfs("#{filer.url}/#{camera_exid}/snapshots/recordings/#{strft_date(date, "%Y")}/#{strft_date(date, "%m")}/#{strft_date(date, "%d")}/", filer.type, filer.attribute)
+  end
+
+  defp download_and_dropbox_batch(date, camera_exid) do
+    filer = point_to_seaweed(Calendar.DateTime.Format.unix(date))
+    "#{filer.url}/#{camera_exid}/snapshots/recordings/#{strft_date(date, "%Y")}/#{strft_date(date, "%m")}/#{strft_date(date, "%d")}/#{strft_date(date, "%H")}/#{strft_date(date, "%M")}_#{strft_date(date, "%S")}_000.jpg"
   end
 
   defp handle_pair(%{starting: starting, ending: ending}, interval) do
@@ -63,7 +77,7 @@ defmodule Extractions do
     end) |> Float.ceil |> trunc()
   end
 
-  defp get_date_pairs(dates, camera_exid, schedule) do
+  defp get_date_pairs(dates, schedule, timezone) do
     dates
     |> Enum.map(fn date ->
       schedule[Calendar.Strftime.strftime!(date, "%A")]
@@ -84,17 +98,15 @@ defmodule Extractions do
     |> Enum.map(fn date_tuple ->
       {starting, ending} = parse_schedule_times(date_tuple)
       %{
-        starting: Calendar.DateTime.from_erl!(starting, "Etc/UTC", {123456, 6}) |> shift_zone,
-        ending: Calendar.DateTime.from_erl!(ending, "Etc/UTC", {123456, 6}) |> shift_zone
+        starting: Calendar.DateTime.from_erl!(starting, timezone, {123456, 6}) |> shift_zone_to_saved_one,
+        ending: Calendar.DateTime.from_erl!(ending, timezone, {123456, 6}) |> shift_zone_to_saved_one
       }
     end)
   end
 
   defp strft_date(date, pattern), do: Calendar.Strftime.strftime!(date, pattern)
 
-  defp shift_zone(date, timezone \\ "Europe/Dublin") do
-    date |> Calendar.DateTime.shift_zone!(timezone)
-  end
+  defp shift_zone_to_saved_one(date), do: date |> Calendar.DateTime.shift_zone!("Etc/UTC")
 
   defp parse_schedule_times(%{"end_hour" => end_hour, "end_minute" => end_minute, "start_hour" => start_hour, "start_minute" => start_minute, "year" => year, "month" => month, "day" => day}) do
     {{{String.to_integer(year), String.to_integer(month), String.to_integer(day)}, {String.to_integer(start_hour), String.to_integer(start_minute), 0}}, {{String.to_integer(year), String.to_integer(month), String.to_integer(day)}, {String.to_integer(end_hour), String.to_integer(end_minute), 0}}}
