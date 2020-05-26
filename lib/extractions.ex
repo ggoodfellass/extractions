@@ -9,8 +9,8 @@ defmodule Extraction do
   require Logger
 
   def start(extractor) do
-    start_date = extractor.from_date #Calendar.DateTime.from_erl!({{2020, 5, 24},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
-    end_date = extractor.to_date #Calendar.DateTime.from_erl!({{2020, 5, 24},{0, 29, 10}}, "Etc/UTC", {123456, 6}) #|> Calendar.DateTime.shift_zone!("Europe/Dublin")
+    start_date = extractor.from_date
+    end_date = extractor.to_date
     schedule =
       extractor.schedule
       |> Enum.filter(fn {_, v} -> length(v) != 0 end)
@@ -40,9 +40,9 @@ defmodule Extraction do
       all_days
       |> get_date_pairs(schedule, camera_timezone)
 
-    IO.inspect expected_count = get_expected_count(valid_dates, interval)
+    expected_count = get_expected_count(valid_dates, interval)
 
-    dates_with_intervals =
+    IO.inspect :timer.tc(fn ->
       valid_dates
       |> Enum.map(&handle_pair(&1, interval))
       |> List.flatten()
@@ -50,10 +50,12 @@ defmodule Extraction do
       |> Enum.filter(&drop_not_available_days(&1, camera_exid) != [])
       |> Enum.flat_map(fn {_drop_date, list_of_datetimes} -> list_of_datetimes end)
       |> Enum.group_by(&Calendar.DateTime.from_erl!({{&1.year, &1.month, &1.day}, {&1.hour, 0, 0}}, camera_timezone))
-      |> IO.inspect(limit: :infinity)
       |> Enum.map(&create_valid_urls(&1, camera_exid, interval))
-      # |> IO.inspect
-      # |> process_url(images_directory)
+      |> List.flatten()
+      |> process_url(images_directory)
+    end)
+
+    clean_images(images_directory)
   end
 
   defp drop_not_available_days({date, _}, camera_exid) do
@@ -62,13 +64,34 @@ defmodule Extraction do
   end
 
   defp create_valid_urls({date, list_of_dates}, camera_exid, interval) do
-    IO.inspect date
-    IO.inspect list_of_dates
+    list =
+      list_of_dates
+      |> Enum.map(&strft_date(&1, "%M_%S_000.jpg"))
     filer = point_to_seaweed(Calendar.DateTime.Format.unix(date))
     "#{filer.url}/#{camera_exid}/snapshots/recordings/#{strft_date(date, "%Y")}/#{strft_date(date, "%m")}/#{strft_date(date, "%d")}/#{strft_date(date, "%H")}/?limit=3600"
     |> request_from_seaweedfs(filer.type, filer.attribute)
-    |> IO.inspect
+    |> ignore_empty_list(list)
+    |> Enum.map(&"#{filer.url}/#{camera_exid}/snapshots/recordings/#{strft_date(date, "%Y")}/#{strft_date(date, "%m")}/#{strft_date(date, "%d")}/#{strft_date(date, "%H")}/#{&1}")
   end
+
+  defp ignore_empty_list([], _list), do: []
+  defp ignore_empty_list(hours, list) do
+    hours
+    |> Enum.reduce_while({list, []}, fn
+      _, {[], acc} -> {:halt, acc}
+      e, {[h|t], acc} ->
+        {:cont, 
+          if(String.split(e, ~w[_ .]) < String.split(h, ~w[_ .]),
+            do: {[h|t], acc},
+            else: {t, [e | acc]})
+        }
+    end)
+    |> handle_tuple_pair()
+    |> Enum.reverse()
+  end
+
+  defp handle_tuple_pair(list) when is_tuple(list) , do: list |> Tuple.to_list |> List.flatten
+  defp handle_tuple_pair(list), do: list
 
   defp process_url([], images_directory) do
     with true <- session_file_exists?(images_directory) do
@@ -79,18 +102,12 @@ defmodule Extraction do
     end
   end 
   defp process_url([head|tail], images_directory) do
-    download_results(head, images_directory)
+    download(head)
+    |> results(images_directory)
     process_url(tail, images_directory)
   end
 
-  defp download(url), do: HTTPoison.get(url, [], [])
-
-  defp download_results(url, images_directory) do
-    send self(), {:url, url}
-    download(url)
-    |> IO.inspect
-    |> results(images_directory)
-  end
+  defp download(url), do: HTTPoison.get(url, [], hackney: [pool: :seaweedfs_download_pool])
 
   defp results({:ok, %HTTPoison.Response{body: body, status_code: 200, request_url: url}}, images_directory) do
     %{
@@ -101,23 +118,15 @@ defmodule Extraction do
       "seconds" => seconds,
       "year" => year
     } = Regex.named_captures(@url_format, url)
-    upload_session(body, images_directory)
     save_current_jpeg_time("#{year}-#{month}-#{day}T#{hour}:#{minutes}:#{seconds}Z", images_directory)
+    upload_session(body, images_directory)
   end
-  defp results({:ok, %HTTPoison.Response{body: "", status_code: 404, request_url: url}}, images_directory) do
-    download_results(url, images_directory)
-  end
-  defp results({:error, %HTTPoison.Error{reason: _reason}}, images_directory) do
-    url =
-      receive do
-        {:url, url} -> url
-      end
-    download_results(url, images_directory)
-  end
+  defp results({:ok, %HTTPoison.Response{body: "", status_code: 404, request_url: url}}, images_directory), do: :noop
+  defp results({:error, %HTTPoison.Error{reason: _reason}}, images_directory), do: :noop
 
   defp upload_session(image, images_directory) do
     image_name = DateTime.to_unix(DateTime.utc_now())
-    image_with_dir = images_directory <> image_name <> ".jpg"
+    image_with_dir = images_directory <> "#{image_name}" <> ".jpg"
     File.write(image_with_dir, image, [:binary]) |> File.close
 
     client = ElixirDropbox.Client.new(System.get_env["DROP_BOX_TOKEN"])
@@ -125,7 +134,13 @@ defmodule Extraction do
 
     try do
       %{"session_id" => session_id} = ElixirDropbox.Files.UploadSession.start(client, true, image_with_dir)
-      write_sessional_values(session_id, file_size, image_with_dir, images_directory)
+      write_sessional_values(
+        session_id, file_size,
+        image_with_dir
+        |> String.replace(@root_dir, "/Construction2")
+        |> String.replace("extract/", ""),
+        images_directory
+      )
       check_1000_chunk(images_directory) |> length() |> commit_if_1000(client, images_directory)
     rescue
       _ ->
