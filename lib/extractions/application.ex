@@ -16,6 +16,7 @@ defmodule Extractions.Application do
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     :ets.new(:storage_servers, [:set, :public, :named_table])
+    Extraction.load_storage_servers
     opts = [strategy: :one_for_one, name: Extractions.Supervisor]
     Supervisor.start_link(children, opts)
   end

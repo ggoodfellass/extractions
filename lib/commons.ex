@@ -15,7 +15,7 @@ defmodule Commons do
   end
 
   def seaweedfs_save(camera_exid, timestamp, image) do
-    [{_, _, _, _, [server]}] = :ets.match_object(:storage_servers, {:_, "RW", :_, :_, :_})
+    server = Extraction.point_to_seaweed(String.to_integer(timestamp))
     hackney = [pool: :seaweedfs_upload_pool]
     directory_path = construct_directory_path(camera_exid, timestamp, "recordings", "")
     file_name = construct_file_name(timestamp)
