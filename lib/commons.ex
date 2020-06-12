@@ -26,7 +26,7 @@ defmodule Commons do
     end
   end
 
-  defp construct_directory_path(camera_exid, timestamp, app_dir, root_dir \\ @root_dir) do
+  defp construct_directory_path(camera_exid, timestamp, app_dir, root_dir) do
     timestamp
     |> Calendar.DateTime.Parse.unix!
     |> Calendar.Strftime.strftime!("#{root_dir}/#{camera_exid}/snapshots/#{app_dir}/%Y/%m/%d/%H/")

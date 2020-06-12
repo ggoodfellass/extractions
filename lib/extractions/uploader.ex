@@ -1,5 +1,5 @@
 defmodule Uploader do
-  @root_dir "/storage"
+  @root_dir "storage"
 
   require Logger
   import Commons
@@ -12,6 +12,7 @@ defmodule Uploader do
 
     dir = @root_dir <> "/" <> from <> "/"
     stream_it(dir, to)
+    # |> Enum.each(&upload(&1))
     |> Task.async_stream(&(uploading.(&1)), max_concurrency: System.schedulers_online() * 2, timeout: :infinity)
     |> Stream.run
   end
@@ -32,7 +33,14 @@ defmodule Uploader do
 
   defp compose("CURRENT", _dir, _to), do: []
   defp compose(file, dir, to) do
-    timestamp = String.split(file, ".") |> List.first
+    timestamp =
+      String.split(file, ".")
+      |> List.first
+      |> Calendar.DateTime.Parse.unix!
+      |> Calendar.DateTime.to_erl
+      |> Calendar.DateTime.from_erl!("Europe/Dublin")
+      |> Calendar.DateTime.shift_zone!("Etc/UTC")
+      |> Calendar.DateTime.Format.unix
     image = File.read!(dir <> file)
     %{
       timestamp: timestamp,
