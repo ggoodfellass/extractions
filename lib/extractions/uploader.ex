@@ -28,6 +28,10 @@ defmodule Uploader do
 
   defp stream_it(dir, to) do
     File.ls!(dir)
+    |> Enum.filter(fn(x) ->
+      [date, _] = String.split(x, ".")
+      String.to_integer(date) > 1573886870
+    end)
     |> Enum.map(&compose(&1, dir, to))
   end
 
